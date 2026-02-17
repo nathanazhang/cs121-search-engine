@@ -9,7 +9,7 @@ from pathlib import Path
 # ----------------- GLOBAL CONFIGURATION -----------------
 
 # **Path to the DEV corpus root folder** (each subfolder is a subdomain).
-DEV_ROOT = Path("DEV_Test")  # change if needed
+DEV_ROOT = Path("DEV")  # change if needed
 
 # **Path where all index files and metadata will be stored.**
 INDEX_ROOT = Path("index_data")
