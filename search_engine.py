@@ -9,8 +9,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from flask import Flask, request, render_template_string
-
 from config import (
     DOC_META_PATH,
     LEXICON_PATH,
@@ -28,6 +26,9 @@ from config import (
     DEBUG_MODE,
 )
 from utils import tokenize, stem, build_ngrams, log_idf
+
+from analytics_store import record_query_time
+import time
 
 # ----------------- LOAD METADATA & LEXICON -----------------
 
@@ -209,62 +210,21 @@ def cli_loop():
         q = input("Query> ").strip()
         if q.lower() == "quit":
             break
+
+        # Analytics [Begin]
+        start = time.perf_counter()
         results = compute_scores(q)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        record_query_time(elapsed_ms)
+        print(f"Query time: {elapsed_ms:.2f} ms")
+        # Analytics [End]
+
         print(f"Top {len(results)} results:")
         for rank, (doc_id, score) in enumerate(results, start=1):
             meta = doc_meta[str(doc_id)]
             print(f"{rank}. {meta['url']} (score={score:.4f})")
 
-# ----------------- WEB INTERFACE -----------------
-
-app = Flask(__name__)
-
-HTML_TEMPLATE = """
-<!doctype html>
-<html>
-<head>
-  <title>ICS Search Engine</title>
-</head>
-<body>
-  <h1>ICS Search Engine</h1>
-  <form method="GET">
-    <input type="text" name="q" value="{{ query|e }}" style="width: 400px;" />
-    <button type="submit">Search</button>
-  </form>
-  {% if query %}
-    <h2>Results for "{{ query|e }}"</h2>
-    <ol>
-    {% for r in results %}
-      <li>
-        <a href="{{ r.url }}" target="_blank">{{ r.url }}</a>
-        <div>Score: {{ "%.4f"|format(r.score) }}</div>
-      </li>
-    {% endfor %}
-    </ol>
-  {% endif %}
-</body>
-</html>
-"""
-
-@app.route("/", methods=["GET"])
-def search_page():
-    q = request.args.get("q", "").strip()
-    results_view = []
-    if q:
-        ranked = compute_scores(q)
-        for doc_id, score in ranked:
-            meta = doc_meta[str(doc_id)]
-            results_view.append({"url": meta["url"], "score": score})
-    return render_template_string(HTML_TEMPLATE, query=q, results=results_view)
-
-def run_web():
-    load_metadata()
-    app.run(host=WEB_HOST, port=WEB_PORT, debug=DEBUG_MODE)
-
 if __name__ == "__main__":
     import sys
     load_metadata()
-    if len(sys.argv) > 1 and sys.argv[1] == "web":
-        run_web()
-    else:
-        cli_loop()
+    cli_loop()

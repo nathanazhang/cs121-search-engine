@@ -1,0 +1,15 @@
+{
+  "indexing": {
+    "num_documents": 55393,
+    "num_unique_tokens": 17624658,
+    "index_size_kb": 6681426.21,
+    "num_duplicates": 10664,
+    "num_near_duplicates": 10664
+  },
+  "search": {
+    "total_queries": 1,
+    "avg_query_time_ms": 16.405400005169213,
+    "max_query_time_ms": 16.405400005169213,
+    "min_query_time_ms": 16.405400005169213
+  }
+}

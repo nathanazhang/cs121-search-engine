@@ -37,6 +37,8 @@ from utils import (
     jaccard,
 )
 
+from analytics_store import record_indexing_stats
+import os
 
 # ============================================================
 #  Utility: Walk the DEV corpus
@@ -409,6 +411,39 @@ def build_index():
     print("Indexing complete.")
     print(f"Documents processed: {current_doc_id}")
     print(f"Final index files written to: {FINAL_INDEX_DIR}")
+
+    # ============================================================
+    #  Analytics [Begin]
+    # ============================================================
+
+    # Count unique tokens (unigrams only)
+    num_unique_tokens = sum(1 for term, meta in lexicon.items() if meta["type"] == "unigram")
+
+    # Count index size
+    index_size_bytes = 0
+    for root, _, files in os.walk("index_data"):
+        for f in files:
+            index_size_bytes += os.path.getsize(os.path.join(root, f))
+
+    index_size_kb = round(index_size_bytes / 1024, 2)
+
+    # Count duplicates
+    num_dups = sum(1 for doc_id, meta in doc_meta.items() if meta["duplicate_of"] is not None)
+    num_near_dups = num_dups  # if you want to separate exact vs near, track separately
+
+    record_indexing_stats(
+        num_docs=current_doc_id,
+        num_tokens=num_unique_tokens,
+        index_size_kb=index_size_kb,
+        num_dups=num_dups,
+        num_near_dups=num_near_dups
+    )
+
+    print("Analytics saved to analytics.json")
+
+    # ============================================================
+    #  Analytics [End]
+    # ============================================================
 
 
 if __name__ == "__main__":
