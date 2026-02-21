@@ -130,7 +130,7 @@ def compute_analytic():
         "index_size_kb_total_kb": size_total,         # combined index size
         "index_size_kb_unigram_index": size_unigram,  # unigram index size
         "index_size_kb_bigram_index": size_bigram,    # bigram index size
-        "index_size_kb_size_trigram_index": size_trigram,  # trigram index size
+        "index_size_kb_trigram_index": size_trigram,  # trigram index size
         "index_size_kb_doc_meta": size_doc_meta,      # doc_meta.json size
         "index_size_kb_duplicate": size_duplicate,     # duplicates.json size
         "index_size_kb_lexicon": size_lexicon,         # lexicon.json size

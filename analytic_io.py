@@ -25,7 +25,7 @@ DEFAULT_ANALYTICS = {
         "index_size_kb_total_kb": 0,           # combined index size
         "index_size_kb_unigram_index": 0,      # unigram index size
         "index_size_kb_bigram_index": 0,       # bigram index size
-        "index_size_kb_size_trigram_index": 0, # trigram index size
+        "index_size_kb_trigram_index": 0, # trigram index size
         "index_size_kb_doc_meta": 0,           # doc_meta.json size
         "index_size_kb_duplicate": 0,          # duplicates.json size
         "index_size_kb_lexicon": 0,            # lexicon.json size
