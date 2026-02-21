@@ -9,66 +9,66 @@ from pathlib import Path
 # ----------------- GLOBAL CONFIGURATION -----------------
 
 # **Path to the DEV corpus root folder** (each subfolder is a subdomain).
-DEV_ROOT = Path("DEV")  # change if needed
+DEV_ROOT = Path("DEV")  # root directory containing all crawled ICS pages
 
 # **Path where all index files and metadata will be stored.**
-INDEX_ROOT = Path("index_data")
-INDEX_ROOT.mkdir(parents=True, exist_ok=True)
+INDEX_ROOT = Path("index_data")  # main directory for all index-related output
+INDEX_ROOT.mkdir(parents=True, exist_ok=True)  # ensure directory exists
 
 # **Partial index directory** (for spill files during indexing).
-PARTIAL_INDEX_DIR = INDEX_ROOT / "partials"
+PARTIAL_INDEX_DIR = INDEX_ROOT / "partials"  # temporary files created when memory fills
 PARTIAL_INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 # **Final index files directory.**
-FINAL_INDEX_DIR = INDEX_ROOT / "final"
+FINAL_INDEX_DIR = INDEX_ROOT / "final"  # final merged index files stored here
 FINAL_INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 # **Metadata files.**
-DOC_META_PATH = INDEX_ROOT / "doc_meta.json"          # doc_id -> metadata (url, length, pagerank, etc.)
-LEXICON_PATH = INDEX_ROOT / "lexicon.json"            # term -> { "file": ..., "offset": ..., "df": ..., "type": "unigram/bigram/trigram" }
-DUPLICATE_MAP_PATH = INDEX_ROOT / "duplicates.json"   # duplicate/near-duplicate mapping
+DOC_META_PATH = INDEX_ROOT / "doc_meta.json"          # doc_id → metadata (url, length, pagerank, duplicate info)
+LEXICON_PATH = INDEX_ROOT / "lexicon.json"            # term → {file, offset, df, type}
+DUPLICATE_MAP_PATH = INDEX_ROOT / "duplicates.json"   # maps doc_id → canonical duplicate
 
 # **Index file names (we'll keep unigrams, bigrams, trigrams separate).**
-UNIGRAM_INDEX_PATH = FINAL_INDEX_DIR / "unigram_index.txt"
-BIGRAM_INDEX_PATH = FINAL_INDEX_DIR / "bigram_index.txt"
-TRIGRAM_INDEX_PATH = FINAL_INDEX_DIR / "trigram_index.txt"
+UNIGRAM_INDEX_PATH = FINAL_INDEX_DIR / "unigram_index.txt"  # final postings for unigrams
+BIGRAM_INDEX_PATH = FINAL_INDEX_DIR / "bigram_index.txt"    # final postings for bigrams
+TRIGRAM_INDEX_PATH = FINAL_INDEX_DIR / "trigram_index.txt"  # final postings for trigrams
 
 # **Spill threshold: when in-memory postings exceed this many distinct terms, flush to disk.**
-MAX_TERMS_IN_MEMORY = 100_000  # tune as needed
+MAX_TERMS_IN_MEMORY = 100_000  # prevents RAM overflow by writing partial indexes
 
 # Delete partial index files after merging?
-DELETE_PARTIALS_AFTER_MERGE = True
+DELETE_PARTIALS_AFTER_MERGE = True  # saves disk space once final index is built
 
 # **Near-duplicate detection parameters.**
-SHINGLE_SIZE = 5               # number of tokens per shingle
-NEAR_DUP_JACCARD_THRESHOLD = 0.9
+SHINGLE_SIZE = 5               # number of tokens per shingle (used for Jaccard similarity)
+NEAR_DUP_JACCARD_THRESHOLD = 0.9  # similarity threshold to classify near-duplicates
 
 # **PageRank parameters.**
-PAGERANK_DAMPING = 0.85
-PAGERANK_ITERATIONS = 20
+PAGERANK_DAMPING = 0.85        # standard damping factor used in PageRank
+PAGERANK_ITERATIONS = 20       # number of iterations to approximate PageRank
 
 # **Ranking weights.**
-TITLE_WEIGHT = 3.0
-HEADING_WEIGHT = 2.0
-BOLD_WEIGHT = 1.5
-ANCHOR_WEIGHT = 2.5
-BASE_TF_WEIGHT = 1.0
-PAGERANK_WEIGHT = 0.3          # how much PageRank influences final score
-NGRAM_BOOST = 1.2              # multiplier for docs matching bigrams/trigrams
-PROXIMITY_BOOST = 1.3          # multiplier for close-term proximity
+TITLE_WEIGHT = 3.0             # boost for matches in <title>
+HEADING_WEIGHT = 2.0           # boost for matches in <h1>, <h2>, <h3>
+BOLD_WEIGHT = 1.5              # boost for matches in <b> or <strong>
+ANCHOR_WEIGHT = 2.5            # boost for matches in anchor text
+BASE_TF_WEIGHT = 1.0           # base multiplier for tf-idf
+PAGERANK_WEIGHT = 0.3          # influence of PageRank on final score
+NGRAM_BOOST = 1.2              # boost for bigram/trigram matches
+PROXIMITY_BOOST = 1.3          # boost when query terms appear close together
 
 # **Search constraints.**
-MAX_RESULTS = 50               # max docs to return
-RESPONSE_TIME_TARGET_MS = 300  # for your own sanity checks, not enforced in code
+MAX_RESULTS = 50               # number of results returned to user
+RESPONSE_TIME_TARGET_MS = 300  # optional performance target (not enforced)
 
 # **Web interface config.**
-WEB_HOST = "127.0.0.1"
-WEB_PORT = 5000
-DEBUG_MODE = False
+WEB_HOST = "127.0.0.1"         # local host for Flask server
+WEB_PORT = 5000                # port for web GUI
+DEBUG_MODE = False             # disable Flask debug mode for stability
 
 # ----------------- UTILITY -----------------
 
 def ensure_dirs():
-    """Ensure all required directories exist."""
+    """Ensure all required directories exist."""  # creates directories if missing
     for p in [INDEX_ROOT, PARTIAL_INDEX_DIR, FINAL_INDEX_DIR]:
-        os.makedirs(p, exist_ok=True)
+        os.makedirs(p, exist_ok=True)            # safe directory creation

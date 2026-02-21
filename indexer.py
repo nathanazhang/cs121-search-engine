@@ -8,37 +8,37 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple
 
-from tqdm import tqdm
+from tqdm import tqdm                     # progress bars for indexing + merging
 
-import analytic_index
+import analytic_index                     # module that computes analytics after indexing
 
 from config import (
-    DEV_ROOT,
-    PARTIAL_INDEX_DIR,
-    FINAL_INDEX_DIR,
-    UNIGRAM_INDEX_PATH,
-    BIGRAM_INDEX_PATH,
-    TRIGRAM_INDEX_PATH,
-    DOC_META_PATH,
-    LEXICON_PATH,
-    DUPLICATE_MAP_PATH,
-    MAX_TERMS_IN_MEMORY,
-    SHINGLE_SIZE,
-    NEAR_DUP_JACCARD_THRESHOLD,
-    PAGERANK_DAMPING,
-    PAGERANK_ITERATIONS,
-    ensure_dirs,
-    DELETE_PARTIALS_AFTER_MERGE,   # NEW CONFIG OPTION
+    DEV_ROOT,                             # root folder containing all DEV JSON pages
+    PARTIAL_INDEX_DIR,                    # directory where partial index files are written
+    FINAL_INDEX_DIR,                      # directory where final merged index files go
+    UNIGRAM_INDEX_PATH,                   # final unigram index file
+    BIGRAM_INDEX_PATH,                    # final bigram index file
+    TRIGRAM_INDEX_PATH,                   # final trigram index file
+    DOC_META_PATH,                        # output metadata file for documents
+    LEXICON_PATH,                         # output lexicon file
+    DUPLICATE_MAP_PATH,                   # output duplicate map file
+    MAX_TERMS_IN_MEMORY,                  # threshold for spilling partial index to disk
+    SHINGLE_SIZE,                         # size of shingles for near-duplicate detection
+    NEAR_DUP_JACCARD_THRESHOLD,           # Jaccard threshold for near-duplicate detection
+    PAGERANK_DAMPING,                     # damping factor for PageRank
+    PAGERANK_ITERATIONS,                  # number of PageRank iterations
+    ensure_dirs,                          # ensures index directories exist
+    DELETE_PARTIALS_AFTER_MERGE,          # config flag to delete partials after merging
 )
 
 from utils import (
-    load_json,
-    save_json,
-    extract_html_fields,
-    stem,
-    build_ngrams,
-    compute_shingles,
-    jaccard,
+    load_json,                             # helper to load JSON safely
+    save_json,                             # helper to save JSON safely
+    extract_html_fields,                   # extracts tokens from HTML (title, headings, bold, etc.)
+    stem,                                  # Porter stemmer wrapper
+    build_ngrams,                          # builds bigrams/trigrams
+    compute_shingles,                      # builds shingles for near-duplicate detection
+    jaccard,                               # computes Jaccard similarity
 )
 
 import os
@@ -48,11 +48,11 @@ import os
 # ============================================================
 
 def walk_corpus(root: Path):
-    """Yield every JSON file in the DEV dataset."""
-    for subdir, _, files in os.walk(root):
+    """Yield every JSON file in the DEV dataset."""       # generator to iterate all pages
+    for subdir, _, files in os.walk(root):                # walk directory tree
         for fname in files:
-            if fname.endswith(".json"):
-                yield Path(subdir) / fname
+            if fname.endswith(".json"):                   # only index JSON pages
+                yield Path(subdir) / fname                # yield full path
 
 
 # ============================================================
@@ -75,37 +75,37 @@ def detect_duplicates(
     """
 
     # ---------- Exact duplicate ----------
-    token_str = " ".join(tokens)
-    token_hash = hash(token_str)
-    exact_key = f"exact:{token_hash}"
+    token_str = " ".join(tokens)                          # join tokens into a single string
+    token_hash = hash(token_str)                          # hash entire document content
+    exact_key = f"exact:{token_hash}"                     # key used to detect exact duplicates
 
-    if exact_key in duplicate_map:
-        canonical = duplicate_map[exact_key]
-        duplicate_map[doc_id] = canonical
+    if exact_key in duplicate_map:                        # if hash already seen → exact duplicate
+        canonical = duplicate_map[exact_key]              # canonical doc id
+        duplicate_map[doc_id] = canonical                 # map this doc to canonical
         return ("exact", canonical)
     else:
-        duplicate_map[exact_key] = doc_id
+        duplicate_map[exact_key] = doc_id                 # first time seeing this hash
 
     # ---------- Near-duplicate ----------
-    shingles = compute_shingles(tokens, SHINGLE_SIZE)
-    doc_shingles[doc_id] = shingles
+    shingles = compute_shingles(tokens, SHINGLE_SIZE)     # compute shingles for near-duplicate detection
+    doc_shingles[doc_id] = shingles                       # store shingles for this doc
 
     candidate_docs = set()
-    for sh in shingles:
-        for other in shingle_index.get(sh, []):
+    for sh in shingles:                                   # for each shingle
+        for other in shingle_index.get(sh, []):           # find docs sharing that shingle
             candidate_docs.add(other)
 
     for other in candidate_docs:
-        sim = jaccard(shingles, doc_shingles[other])
-        if sim >= NEAR_DUP_JACCARD_THRESHOLD:
-            duplicate_map[doc_id] = other
+        sim = jaccard(shingles, doc_shingles[other])      # compute Jaccard similarity
+        if sim >= NEAR_DUP_JACCARD_THRESHOLD:             # near-duplicate threshold
+            duplicate_map[doc_id] = other                 # map to canonical doc
             return ("near", other)
 
-    # Update shingle index
+    # Update shingle index for future comparisons
     for sh in shingles:
-        shingle_index.setdefault(sh, []).append(doc_id)
+        shingle_index.setdefault(sh, []).append(doc_id)   # add doc to shingle posting list
 
-    return None
+    return None                                            # unique document
 
 
 # ============================================================
@@ -123,23 +123,22 @@ def add_links_to_graph(
     Build link graph from anchor tags.
     Only internal ICS links are considered.
     """
-    for href, _tokens in anchor_links:
+    for href, _tokens in anchor_links:                    # iterate all anchor tags
         if not href:
             continue
 
-        # Normalize URL
-        if href.startswith("http"):
-            if "ics.uci.edu" not in href:
+        if href.startswith("http"):                       # absolute URL
+            if "ics.uci.edu" not in href:                 # skip external links
                 continue
-            target_url = href.split("#")[0]
+            target_url = href.split("#")[0]               # remove fragment
         else:
+            continue                                      # skip relative URLs for simplicity
+
+        if target_url not in url_to_id:                   # skip links to pages not in corpus
             continue
 
-        if target_url not in url_to_id:
-            continue
-
-        target_id = url_to_id[target_url]
-        out_links.setdefault(source_id, set()).add(target_id)
+        target_id = url_to_id[target_url]                 # map URL → doc_id
+        out_links.setdefault(source_id, set()).add(target_id)  # add edge source → target
 
 
 # ============================================================
@@ -153,21 +152,22 @@ def write_partial_index(
     tri: Dict[str, Dict[int, dict]],
 ) -> Tuple[Path, Path, Path]:
 
+    # file paths for partial indexes
     uni_path = PARTIAL_INDEX_DIR / f"unigram_part_{part_id}.txt"
     bi_path = PARTIAL_INDEX_DIR / f"bigram_part_{part_id}.txt"
     tri_path = PARTIAL_INDEX_DIR / f"trigram_part_{part_id}.txt"
 
     def write(path: Path, postings: Dict[str, Dict[int, dict]]):
         with path.open("w", encoding="utf-8") as f:
-            for term in sorted(postings.keys()):
-                line = json.dumps(postings[term], separators=(",", ":"))
-                f.write(f"{term}\t{line}\n")
+            for term in sorted(postings.keys()):          # sort terms for deterministic merging
+                line = json.dumps(postings[term], separators=(",", ":"))  # compact JSON
+                f.write(f"{term}\t{line}\n")              # write "term<TAB>json"
 
-    write(uni_path, uni)
-    write(bi_path, bi)
-    write(tri_path, tri)
+    write(uni_path, uni)                                  # write unigram partial
+    write(bi_path, bi)                                    # write bigram partial
+    write(tri_path, tri)                                  # write trigram partial
 
-    return uni_path, bi_path, tri_path
+    return uni_path, bi_path, tri_path                    # return paths for merging later
 
 
 # ============================================================
@@ -188,40 +188,36 @@ def merge_partial_files(
     - Skips malformed lines
     """
 
-    # Open partial files
-    files = [p.open("r", encoding="utf-8") for p in partial_paths]
-    buffers = [f.readline() for f in files]
+    files = [p.open("r", encoding="utf-8") for p in partial_paths]   # open all partials
+    buffers = [f.readline() for f in files]                          # read first line of each
 
-    # Count total lines across all partials for progress bar
+    # Count total lines for progress bar
     total_lines = 0
     for p in partial_paths:
         with p.open("r", encoding="utf-8") as f:
             for _ in f:
                 total_lines += 1
 
-    # Progress bar for merging
-    pbar = tqdm(total=total_lines,
-                desc=f"Merging {term_type} partials",
-                unit="lines")
+    pbar = tqdm(total=total_lines, desc=f"Merging {term_type} partials", unit="lines")
 
     with final_path.open("wb") as out:
-        offset = 0
+        offset = 0                                                  # byte offset for lexicon
 
         while True:
             candidates = []
             for i, line in enumerate(buffers):
                 if not line or "\t" not in line:
                     continue
-                term = line.split("\t", 1)[0]
-                candidates.append((term, i))
+                term = line.split("\t", 1)[0]                       # extract term
+                candidates.append((term, i))                        # track which file it came from
 
             if not candidates:
-                break
+                break                                               # all files exhausted
 
-            candidates.sort(key=lambda x: x[0])
+            candidates.sort(key=lambda x: x[0])                     # pick smallest term lexicographically
             smallest_term = candidates[0][0]
 
-            merged = {}
+            merged = {}                                             # merged postings for this term
 
             for i, line in enumerate(buffers):
                 if not line or "\t" not in line:
@@ -232,47 +228,45 @@ def merge_partial_files(
                     continue
 
                 try:
-                    postings = json.loads(rest.strip())
+                    postings = json.loads(rest.strip())             # parse postings JSON
                 except Exception:
-                    buffers[i] = files[i].readline()
+                    buffers[i] = files[i].readline()                # skip malformed line
                     pbar.update(1)
                     continue
 
-                for doc_id_str, pdata in postings.items():
+                for doc_id_str, pdata in postings.items():          # merge postings
                     doc_id = int(doc_id_str)
                     if doc_id not in merged:
                         merged[doc_id] = pdata
                     else:
-                        for k, v in pdata.items():
+                        for k, v in pdata.items():                  # merge fields
                             if k == "positions":
-                                merged[doc_id].setdefault("positions", [])
-                                merged[doc_id]["positions"].extend(v)
+                                merged[doc_id].setdefault("positions", []).extend(v)
                             elif k == "tf":
                                 merged[doc_id]["tf"] = merged[doc_id].get("tf", 0) + v
                             else:
                                 merged[doc_id][k] = merged[doc_id].get(k, False) or v
 
-                buffers[i] = files[i].readline()
+                buffers[i] = files[i].readline()                    # advance file pointer
                 pbar.update(1)
 
-            # Write merged line
-            line_str = json.dumps(merged, separators=(",", ":"))
+            line_str = json.dumps(merged, separators=(",", ":"))    # compact JSON
             out_line = f"{smallest_term}\t{line_str}\n".encode("utf-8")
-            out.write(out_line)
+            out.write(out_line)                                     # write merged line
 
-            lexicon[smallest_term] = {
+            lexicon[smallest_term] = {                              # record lexicon entry
                 "file": str(final_path),
                 "offset": offset,
                 "df": len(merged),
                 "type": term_type,
             }
 
-            offset += len(out_line)
+            offset += len(out_line)                                 # update byte offset
 
     pbar.close()
 
     for f in files:
-        f.close()
+        f.close()                                                   # close all partial files
 
 
 # ============================================================
@@ -283,9 +277,9 @@ def delete_partials(partial_uni, partial_bi, partial_tri):
     """Delete partial index files safely."""
     for p in partial_uni + partial_bi + partial_tri:
         try:
-            p.unlink()
+            p.unlink()                                              # delete file
         except Exception:
-            pass
+            pass                                                    # ignore errors
 
 
 # ============================================================
@@ -294,21 +288,21 @@ def delete_partials(partial_uni, partial_bi, partial_tri):
 
 def compute_pagerank(num_docs: int, out_links: Dict[int, Set[int]]) -> Dict[int, float]:
     N = num_docs
-    pr = {i: 1.0 / N for i in range(N)}
+    pr = {i: 1.0 / N for i in range(N)}                             # initialize uniform PageRank
 
-    in_links = {i: set() for i in range(N)}
+    in_links = {i: set() for i in range(N)}                         # build reverse adjacency list
     for src, targets in out_links.items():
         for t in targets:
             in_links[t].add(src)
 
-    for _ in range(PAGERANK_ITERATIONS):
+    for _ in range(PAGERANK_ITERATIONS):                            # iterate PageRank updates
         new_pr = {}
         for i in range(N):
             rank_sum = 0.0
             for j in in_links[i]:
                 outdeg = len(out_links.get(j, []))
                 if outdeg > 0:
-                    rank_sum += pr[j] / outdeg
+                    rank_sum += pr[j] / outdeg                      # distribute PageRank
             new_pr[i] = (1 - PAGERANK_DAMPING) / N + PAGERANK_DAMPING * rank_sum
         pr = new_pr
 
@@ -320,21 +314,21 @@ def compute_pagerank(num_docs: int, out_links: Dict[int, Set[int]]) -> Dict[int,
 # ============================================================
 
 def build_index():
-    ensure_dirs()
+    ensure_dirs()                                                   # ensure index directories exist
 
-    unigram = {}
+    unigram = {}                                                    # in-memory postings
     bigram = {}
     trigram = {}
 
-    doc_meta = {}
-    duplicate_map = {}
-    shingle_index = {}
-    doc_shingles = {}
+    doc_meta = {}                                                   # metadata for each doc
+    duplicate_map = {}                                              # duplicate mapping
+    shingle_index = {}                                              # shingle → doc_ids
+    doc_shingles = {}                                               # doc_id → shingles
 
-    url_to_id = {}
-    out_links = {}
+    url_to_id = {}                                                  # URL → doc_id
+    out_links = {}                                                  # PageRank graph
 
-    partial_uni = []
+    partial_uni = []                                                # paths to partial files
     partial_bi = []
     partial_tri = []
 
@@ -344,62 +338,52 @@ def build_index():
     exact_dup_count = 0
     near_dup_count = 0
 
-    # Pre-scan corpus for progress bar with ETA
-    all_files = list(walk_corpus(DEV_ROOT))
+    all_files = list(walk_corpus(DEV_ROOT))                         # list all pages
     total_docs = len(all_files)
 
-    progress = tqdm(all_files,
-                    total=total_docs,
-                    desc="Indexing",
-                    unit="doc")
+    progress = tqdm(all_files, total=total_docs, desc="Indexing", unit="doc")
 
     for page_path in progress:
-        page_data = load_json(page_path)
+        page_data = load_json(page_path)                            # load JSON page
         url = page_data.get("url", "")
         html = page_data.get("content", "")
         if not url:
             continue
 
-        doc_id = current_doc_id
+        doc_id = current_doc_id                                     # assign doc_id
         current_doc_id += 1
-        url_to_id[url] = doc_id
+        url_to_id[url] = doc_id                                     # map URL → doc_id
 
-        fields = extract_html_fields(html)
+        fields = extract_html_fields(html)                          # extract tokens from HTML
         full_tokens = fields["full_tokens"]
 
-        # Duplicate detection
         dup_result = detect_duplicates(doc_id, full_tokens, shingle_index, doc_shingles, duplicate_map)
-        if dup_result is not None:
+        if dup_result is not None:                                  # skip duplicates
             dup_type, canonical = dup_result
             if dup_type == "exact":
                 exact_dup_count += 1
             else:
                 near_dup_count += 1
 
-            doc_meta[doc_id] = {
+            doc_meta[doc_id] = {                                    # record duplicate metadata
                 "url": url,
                 "duplicate_of": canonical,
                 "duplicate_type": dup_type,
                 "length": 0
             }
 
-            progress.set_postfix({
-                "exact_dups": exact_dup_count,
-                "near_dups": near_dup_count
-            })
+            progress.set_postfix({"exact_dups": exact_dup_count, "near_dups": near_dup_count})
             continue
 
-        # Stem tokens
-        stems = [stem(t) for t in full_tokens]
+        stems = [stem(t) for t in full_tokens]                      # stem tokens
         title_stems = set(stem(t) for t in fields["title_tokens"])
         heading_stems = set(stem(t) for t in fields["heading_tokens"])
         bold_stems = set(stem(t) for t in fields["bold_tokens"])
         anchor_stems = set(stem(t) for t in fields["anchor_tokens"])
 
-        # Unigrams with positions
         term_positions = defaultdict(list)
         for pos, tok in enumerate(stems):
-            term_positions[tok].append(pos)
+            term_positions[tok].append(pos)                         # record term positions
 
         for term, positions in term_positions.items():
             entry = unigram.setdefault(term, {}).setdefault(doc_id, {
@@ -410,35 +394,31 @@ def build_index():
                 "bold": False,
                 "anchor": False,
             })
-            entry["tf"] += len(positions)
-            entry["positions"].extend(positions)
+            entry["tf"] += len(positions)                           # term frequency
+            entry["positions"].extend(positions)                    # positional info
             entry["title"] = entry["title"] or (term in title_stems)
             entry["heading"] = entry["heading"] or (term in heading_stems)
             entry["bold"] = entry["bold"] or (term in bold_stems)
             entry["anchor"] = entry["anchor"] or (term in anchor_stems)
 
-        # N-grams
-        for bg in build_ngrams(stems, 2):
+        for bg in build_ngrams(stems, 2):                           # build bigrams
             bigram.setdefault(bg, {}).setdefault(doc_id, {"tf": 0})
             bigram[bg][doc_id]["tf"] += 1
 
-        for tg in build_ngrams(stems, 3):
+        for tg in build_ngrams(stems, 3):                           # build trigrams
             trigram.setdefault(tg, {}).setdefault(doc_id, {"tf": 0})
             trigram[tg][doc_id]["tf"] += 1
 
-        # PageRank graph
         add_links_to_graph(doc_id, url, fields["anchor_links"], url_to_id, out_links)
 
-        # Metadata
-        doc_meta[doc_id] = {
+        doc_meta[doc_id] = {                                        # record metadata
             "url": url,
             "duplicate_of": None,
             "duplicate_type": None,
             "length": len(stems)
         }
 
-        # Spill if needed
-        if len(unigram) > MAX_TERMS_IN_MEMORY:
+        if len(unigram) > MAX_TERMS_IN_MEMORY:                      # spill partial index
             part_id += 1
             u, b, t = write_partial_index(part_id, unigram, bigram, trigram)
             partial_uni.append(u)
@@ -448,48 +428,39 @@ def build_index():
             bigram.clear()
             trigram.clear()
 
-        progress.set_postfix({
-            "exact_dups": exact_dup_count,
-            "near_dups": near_dup_count
-        })
+        progress.set_postfix({"exact_dups": exact_dup_count, "near_dups": near_dup_count})
 
-    # Final spill
-    if unigram:
+    if unigram:                                                     # final spill
         part_id += 1
         u, b, t = write_partial_index(part_id, unigram, bigram, trigram)
         partial_uni.append(u)
         partial_bi.append(b)
         partial_tri.append(t)
 
-    # Merge partials
-    lexicon = {}
+    lexicon = {}                                                    # final lexicon
     merge_partial_files(partial_uni, UNIGRAM_INDEX_PATH, lexicon, "unigram")
     merge_partial_files(partial_bi, BIGRAM_INDEX_PATH, lexicon, "bigram")
     merge_partial_files(partial_tri, TRIGRAM_INDEX_PATH, lexicon, "trigram")
 
-    # Delete partials if enabled
-    if DELETE_PARTIALS_AFTER_MERGE:
+    if DELETE_PARTIALS_AFTER_MERGE:                                 # delete partials if enabled
         delete_partials(partial_uni, partial_bi, partial_tri)
         print("Partial index files deleted (config enabled).")
     else:
         print("Partial index files retained (config disabled).")
 
-    # PageRank
-    pr = compute_pagerank(current_doc_id, out_links)
+    pr = compute_pagerank(current_doc_id, out_links)                # compute PageRank
     for doc_id in doc_meta:
         doc_meta[doc_id]["pagerank"] = pr.get(doc_id, 0.0)
 
-    # Save metadata
-    save_json(DOC_META_PATH, doc_meta)
-    save_json(LEXICON_PATH, lexicon)
-    save_json(DUPLICATE_MAP_PATH, duplicate_map)
+    save_json(DOC_META_PATH, doc_meta)                              # save metadata
+    save_json(LEXICON_PATH, lexicon)                                # save lexicon
+    save_json(DUPLICATE_MAP_PATH, duplicate_map)                    # save duplicate map
 
     print("Indexing complete.")
     print(f"Final index files written to: {FINAL_INDEX_DIR}")
 
-    # Analytics
-    analytic_index.compute_analytic()
+    analytic_index.compute_analytic()                               # compute analytics
 
 
 if __name__ == "__main__":
-    build_index()
+    build_index()                                                   # run indexer

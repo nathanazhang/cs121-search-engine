@@ -6,50 +6,48 @@ and then manually edited to fit assignment specifications.
 import json
 from pathlib import Path
 
-ANALYTIC_PATH = Path("analytic.json")
+ANALYTIC_PATH = Path("analytic.json")  # file where analytics are stored
 
+# Default analytics structure (used when file does not exist yet)
 DEFAULT_ANALYTICS = {
     "indexing": {
-        # Indexed document count
-        "num_document": 0,
+        "num_document": 0,                     # number of indexed documents
 
-        # Token counts
-        "num_token_total": 0,
-        "num_token_unigram": 0,
-        "num_token_bigram": 0,
-        "num_token_trigram": 0,
+        "num_token_total": 0,                  # total vocabulary size
+        "num_token_unigram": 0,                # unigram vocab size
+        "num_token_bigram": 0,                 # bigram vocab size
+        "num_token_trigram": 0,                # trigram vocab size
 
-        # Duplicate counts
-        "num_duplicate_total": 0,
-        "num_duplicate_exact": 0,
-        "num_duplicate_near": 0,
+        "num_duplicate_total": 0,              # total duplicates
+        "num_duplicate_exact": 0,              # exact duplicates
+        "num_duplicate_near": 0,               # near duplicates
 
-        # Index file sizes
-        "index_size_kb_total_kb": 0,
-        "index_size_kb_unigram_index": 0,
-        "index_size_kb_bigram_index": 0,
-        "index_size_kb_size_trigram_index": 0,
-        "index_size_kb_doc_meta": 0,
-        "index_size_kb_duplicate": 0,
-        "index_size_kb_lexicon": 0,
+        "index_size_kb_total_kb": 0,           # combined index size
+        "index_size_kb_unigram_index": 0,      # unigram index size
+        "index_size_kb_bigram_index": 0,       # bigram index size
+        "index_size_kb_size_trigram_index": 0, # trigram index size
+        "index_size_kb_doc_meta": 0,           # doc_meta.json size
+        "index_size_kb_duplicate": 0,          # duplicates.json size
+        "index_size_kb_lexicon": 0,            # lexicon.json size
     },
     "search": {
-        "total_queries": 0,
-        "avg_query_time_ms": 0.0,
-        "max_query_time_ms": 0.0,
-        "min_query_time_ms": None,
+        "total_queries": 0,                    # number of queries issued
+        "avg_query_time_ms": 0.0,              # running average of query latency
+        "max_query_time_ms": 0.0,              # slowest query seen
+        "min_query_time_ms": None,             # fastest query seen
     }
 }
 
 def load_analytic():
-    if ANALYTIC_PATH.exists():
+    if ANALYTIC_PATH.exists():                 # if analytics file exists
         with ANALYTIC_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            data = json.load(f)                # load analytics JSON
     else:
-        return DEFAULT_ANALYTICS.copy()
+        return DEFAULT_ANALYTICS.copy()        # return default structure
 
-    return data
+    return data                                # return loaded analytics
+
 
 def save_analytic(data):
     with ANALYTIC_PATH.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2)           # pretty-print analytics JSON

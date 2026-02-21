@@ -8,66 +8,70 @@ import os
 from pathlib import Path
 
 from config import (
-    INDEX_ROOT,
-    LEXICON_PATH,
-    DOC_META_PATH,
-    DUPLICATE_MAP_PATH,
-    UNIGRAM_INDEX_PATH,
-    BIGRAM_INDEX_PATH,
-    TRIGRAM_INDEX_PATH,
+    INDEX_ROOT,                     # root directory containing all index files
+    LEXICON_PATH,                   # path to lexicon.json
+    DOC_META_PATH,                  # path to doc_meta.json
+    DUPLICATE_MAP_PATH,             # path to duplicates.json
+    UNIGRAM_INDEX_PATH,             # final unigram index file
+    BIGRAM_INDEX_PATH,              # final bigram index file
+    TRIGRAM_INDEX_PATH,             # final trigram index file
 )
 
-import analytic_io
+import analytic_io                  # module for loading/saving analytics JSON
+
 
 def load_json(path: Path):
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    with path.open("r", encoding="utf-8") as f:  # open file safely
+        return json.load(f)                      # parse JSON into Python object
+
 
 # ------------------------------------------------------------
 #  Compute size of a single file safely
 # ------------------------------------------------------------
 def file_size_kb(path: Path):
-    if not path.exists():
+    if not path.exists():                        # if file missing, size = 0
         return 0.0
-    return round(os.path.getsize(path) / 1024, 2)
+    return round(os.path.getsize(path) / 1024, 2)  # convert bytes → KB (rounded)
+
 
 # ------------------------------------------------------------
 #  Compute total index directory size
 # ------------------------------------------------------------
 def compute_index_size_kb():
     total = 0
-    for root, _, files in os.walk(INDEX_ROOT):
+    for root, _, files in os.walk(INDEX_ROOT):   # walk entire index_data directory
         for f in files:
-            total += os.path.getsize(os.path.join(root, f))
-    return round(total / 1024, 2)
+            total += os.path.getsize(os.path.join(root, f))  # accumulate file sizes
+    return round(total / 1024, 2)                # convert bytes → KB
+
 
 # ------------------------------------------------------------
 #  Main analytics computation
 # ------------------------------------------------------------
 def compute_analytic():
-    lexicon = load_json(LEXICON_PATH)
-    doc_meta = load_json(DOC_META_PATH)
+    lexicon = load_json(LEXICON_PATH)            # load lexicon (term → metadata)
+    doc_meta = load_json(DOC_META_PATH)          # load document metadata
 
-    analytic = analytic_io.load_analytic()
+    analytic = analytic_io.load_analytic()       # load existing analytics (preserves search stats)
 
     # ----------------------------
     # Document counts
     # ----------------------------
-    num_doc = len(doc_meta)
+    num_doc = len(doc_meta)                      # number of indexed documents
 
     # ----------------------------
     # Token counts
     # ----------------------------
-    num_token_unigram = sum(
+    num_token_unigram = sum(                     # count unigram terms
         1 for term, meta in lexicon.items() if meta["type"] == "unigram"
     )
-    num_token_bigram = sum(
+    num_token_bigram = sum(                      # count bigram terms
         1 for term, meta in lexicon.items() if meta["type"] == "bigram"
     )
-    num_token_trigram = sum(
+    num_token_trigram = sum(                     # count trigram terms
         1 for term, meta in lexicon.items() if meta["type"] == "trigram"
     )
-    num_token_total = (
+    num_token_total = (                          # total vocabulary size
         num_token_unigram
         + num_token_bigram
         + num_token_trigram
@@ -79,26 +83,26 @@ def compute_analytic():
     num_exact = 0
     num_near = 0
 
-    for meta in doc_meta.values():
-        if meta.get("duplicate_of") is not None:
+    for meta in doc_meta.values():               # iterate all documents
+        if meta.get("duplicate_of") is not None: # skip unique docs
             if meta.get("duplicate_type") == "exact":
-                num_exact += 1
+                num_exact += 1                   # exact duplicate count
             elif meta.get("duplicate_type") == "near":
-                num_near += 1
+                num_near += 1                    # near duplicate count
 
-    num_total = num_exact + num_near
+    num_total = num_exact + num_near             # total duplicates
 
     # ----------------------------
     # File sizes
     # ----------------------------
-    size_unigram = file_size_kb(UNIGRAM_INDEX_PATH)
-    size_bigram = file_size_kb(BIGRAM_INDEX_PATH)
-    size_trigram = file_size_kb(TRIGRAM_INDEX_PATH)
-    size_doc_meta = file_size_kb(DOC_META_PATH)
-    size_duplicate = file_size_kb(DUPLICATE_MAP_PATH)
-    size_lexicon = file_size_kb(LEXICON_PATH)
+    size_unigram = file_size_kb(UNIGRAM_INDEX_PATH)   # size of unigram index
+    size_bigram = file_size_kb(BIGRAM_INDEX_PATH)     # size of bigram index
+    size_trigram = file_size_kb(TRIGRAM_INDEX_PATH)   # size of trigram index
+    size_doc_meta = file_size_kb(DOC_META_PATH)       # size of doc_meta.json
+    size_duplicate = file_size_kb(DUPLICATE_MAP_PATH) # size of duplicates.json
+    size_lexicon = file_size_kb(LEXICON_PATH)         # size of lexicon.json
 
-    size_total = round(
+    size_total = round(                               # combined size of all index files
         size_unigram
         + size_bigram
         + size_trigram
@@ -111,34 +115,31 @@ def compute_analytic():
     # ----------------------------
     # Save analytics
     # ----------------------------
-    analytic["indexing"] = {
-        # Indexed document count
-        "num_document": num_doc,
+    analytic["indexing"] = {                          # overwrite indexing section
+        "num_document": num_doc,                      # number of indexed docs
 
-        # Token counts
-        "num_token_total": num_token_total,
-        "num_token_unigram": num_token_unigram,
-        "num_token_bigram": num_token_bigram,
-        "num_token_trigram": num_token_trigram,
+        "num_token_total": num_token_total,           # total vocabulary size
+        "num_token_unigram": num_token_unigram,       # unigram vocab size
+        "num_token_bigram": num_token_bigram,         # bigram vocab size
+        "num_token_trigram": num_token_trigram,       # trigram vocab size
 
-        # Duplicate counts
-        "num_duplicate_total": num_total,
-        "num_duplicate_exact": num_exact,
-        "num_duplicate_near": num_near,
+        "num_duplicate_total": num_total,             # total duplicates
+        "num_duplicate_exact": num_exact,             # exact duplicates
+        "num_duplicate_near": num_near,               # near duplicates
 
-        # Index file sizes
-        "index_size_kb_total_kb": size_total,
-        "index_size_kb_unigram_index": size_unigram,
-        "index_size_kb_bigram_index": size_bigram,
-        "index_size_kb_size_trigram_index": size_trigram,
-        "index_size_kb_doc_meta": size_doc_meta,
-        "index_size_kb_duplicate": size_duplicate,
-        "index_size_kb_lexicon": size_lexicon,
+        "index_size_kb_total_kb": size_total,         # combined index size
+        "index_size_kb_unigram_index": size_unigram,  # unigram index size
+        "index_size_kb_bigram_index": size_bigram,    # bigram index size
+        "index_size_kb_size_trigram_index": size_trigram,  # trigram index size
+        "index_size_kb_doc_meta": size_doc_meta,      # doc_meta.json size
+        "index_size_kb_duplicate": size_duplicate,     # duplicates.json size
+        "index_size_kb_lexicon": size_lexicon,         # lexicon.json size
     }
 
-    analytic_io.save_analytic(analytic)
+    analytic_io.save_analytic(analytic)               # write updated analytics to disk
 
-    print("Index analytics written to analytic.json")
+    print("Index analytics written to analytic.json") # user feedback
+
 
 if __name__ == "__main__":
-    compute_analytic()
+    compute_analytic()                                # run analytics if executed directly

@@ -11,112 +11,131 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from config import (
-    DOC_META_PATH,
-    LEXICON_PATH,
-    TITLE_WEIGHT,
-    HEADING_WEIGHT,
-    BOLD_WEIGHT,
-    ANCHOR_WEIGHT,
-    BASE_TF_WEIGHT,
-    PAGERANK_WEIGHT,
-    NGRAM_BOOST,
-    PROXIMITY_BOOST,
-    MAX_RESULTS,
+    DOC_META_PATH,          # path to doc metadata JSON
+    LEXICON_PATH,           # path to lexicon JSON
+    TITLE_WEIGHT,           # weight multiplier for title matches
+    HEADING_WEIGHT,         # weight multiplier for heading matches
+    BOLD_WEIGHT,            # weight multiplier for bold text matches
+    ANCHOR_WEIGHT,          # weight multiplier for anchor text matches
+    BASE_TF_WEIGHT,         # base multiplier for tf-idf
+    PAGERANK_WEIGHT,        # weight multiplier for PageRank
+    NGRAM_BOOST,            # boost for bigram/trigram matches
+    PROXIMITY_BOOST,        # multiplier for close-term proximity
+    MAX_RESULTS,            # number of results to return
 )
-from utils import tokenize, stem, build_ngrams, log_idf
+from utils import tokenize, stem, build_ngrams, log_idf   # core text utilities
 
-from analytic_query import record_query_time
+from analytic_query import record_query_time              # analytics logging
 
 # ----------------- LOAD METADATA & LEXICON -----------------
 
-doc_meta: Dict[int, dict] = {}
-lexicon: Dict[str, dict] = {}
+doc_meta: Dict[int, dict] = {}     # maps doc_id → metadata (pagerank, url, length, duplicate info)
+lexicon: Dict[str, dict] = {}      # maps term → {file, offset, df, type}
 
 def load_metadata():
+    """
+    Loads doc_meta and lexicon from disk.
+    These are required before any searching can happen.
+    """
     global doc_meta, lexicon
 
     steps = [
-        ("Loading document metadata", DOC_META_PATH),
-        ("Loading lexicon", LEXICON_PATH),
+        ("Loading document metadata", DOC_META_PATH),   # doc_meta.json
+        ("Loading lexicon", LEXICON_PATH),              # lexicon.json
     ]
 
     for desc, path in steps:
         if path == DOC_META_PATH:
-            doc_meta = json.loads(Path(DOC_META_PATH).read_text(encoding="utf-8"))
+            doc_meta = json.loads(Path(DOC_META_PATH).read_text(encoding="utf-8"))   # load doc metadata
         elif path == LEXICON_PATH:
-            lexicon = json.loads(Path(LEXICON_PATH).read_text(encoding="utf-8"))
+            lexicon = json.loads(Path(LEXICON_PATH).read_text(encoding="utf-8"))     # load lexicon
+
 
 # ----------------- POSTINGS ACCESS -----------------
 
 def read_postings(term: str) -> Tuple[Dict[int, dict], str]:
     """
-    Read postings for a term from the appropriate index file.
-    Returns (postings_dict, term_type).
-    Includes safety checks for malformed lines.
+    Reads postings for a term using the lexicon entry.
+    Returns:
+        postings_dict: {doc_id → posting info}
+        term_type: "unigram", "bigram", or "trigram"
     """
-    entry = lexicon.get(term)
-    if not entry:
-        return {}, ""
 
-    file_path = Path(entry["file"])
-    offset = entry["offset"]
-    term_type = entry["type"]
+    entry = lexicon.get(term)                 # lookup term in lexicon
+    if not entry:
+        return {}, ""                         # term not found
+
+    file_path = Path(entry["file"])           # which index file contains this term
+    offset = entry["offset"]                  # byte offset inside that file
+    term_type = entry["type"]                 # unigram/bigram/trigram
 
     with file_path.open("rb") as f:
-        f.seek(offset)
-        line = f.readline().decode("utf-8", errors="ignore")
+        f.seek(offset)                        # jump directly to the term's line
+        line = f.readline().decode("utf-8", errors="ignore")  # read the full postings line
 
-    # SAFETY FIX: skip malformed lines
-    parts = line.split("\t", 1)
+    parts = line.split("\t", 1)               # split "term\t{json}"
     if len(parts) != 2:
-        return {}, ""
+        return {}, ""                         # malformed line → skip
 
     _term, rest = parts
     try:
-        postings = json.loads(rest.strip())
+        postings = json.loads(rest.strip())   # parse JSON postings
     except Exception:
-        return {}, ""
+        return {}, ""                         # corrupted JSON → skip
 
-    postings_int = {int(k): v for k, v in postings.items()}
+    postings_int = {int(k): v for k, v in postings.items()}   # convert doc_id keys to int
     return postings_int, term_type
+
 
 # ----------------- RANKING -----------------
 
 def compute_scores(query: str) -> List[Tuple[int, float]]:
-    q_tokens = tokenize(query)
-    q_stems = [stem(t) for t in q_tokens]
+    """
+    Computes ranked results for a query using:
+    - tf-idf
+    - field weights (title, heading, bold, anchor)
+    - n-gram boosts
+    - positional proximity
+    - PageRank
+    - length normalization
+    """
+
+    q_tokens = tokenize(query)                        # raw tokens
+    q_stems = [stem(t) for t in q_tokens]             # stemmed tokens
 
     q_tf: Dict[str, int] = defaultdict(int)
     for t in q_stems:
-        q_tf[t] += 1
+        q_tf[t] += 1                                  # query term frequency
 
-    q_bigrams = build_ngrams(q_stems, 2)
-    q_trigrams = build_ngrams(q_stems, 3)
+    q_bigrams = build_ngrams(q_stems, 2)              # bigram query terms
+    q_trigrams = build_ngrams(q_stems, 3)             # trigram query terms
 
-    scores: Dict[int, float] = defaultdict(float)
-    N = len(doc_meta)
+    scores: Dict[int, float] = defaultdict(float)     # doc_id → accumulated score
+    N = len(doc_meta)                                 # total number of documents
 
-    # 1) Unigram tf-idf
+    # ----------------- 1) Unigram tf-idf -----------------
+
     for term, qfreq in q_tf.items():
-        postings, term_type = read_postings(term)
+        postings, term_type = read_postings(term)     # load postings for this term
         if not postings or term_type != "unigram":
-            continue
+            continue                                  # skip if not a unigram
 
-        df = len(postings)
-        idf = log_idf(N, df)
-        wq = (1 + math.log(qfreq)) * idf
+        df = len(postings)                            # document frequency
+        idf = log_idf(N, df)                          # log(N/df)
+        wq = (1 + math.log(qfreq)) * idf              # query weight
 
         for doc_id, pdata in postings.items():
             meta = doc_meta.get(str(doc_id))
             if not meta or meta.get("duplicate_of") is not None:
-                continue
+                continue                              # skip duplicates
 
             tf = pdata.get("tf", 0)
             if tf <= 0:
                 continue
 
-            wd = (1 + math.log(tf))
+            wd = (1 + math.log(tf))                   # document weight
 
+            # Apply field boosts
             if pdata.get("title"):
                 wd *= TITLE_WEIGHT
             if pdata.get("heading"):
@@ -126,9 +145,10 @@ def compute_scores(query: str) -> List[Tuple[int, float]]:
             if pdata.get("anchor"):
                 wd *= ANCHOR_WEIGHT
 
-            scores[doc_id] += BASE_TF_WEIGHT * wq * wd
+            scores[doc_id] += BASE_TF_WEIGHT * wq * wd   # accumulate tf-idf score
 
-    # 2) N-gram boosts
+    # ----------------- 2) N-gram boosts -----------------
+
     for ngram in q_bigrams + q_trigrams:
         postings, _ = read_postings(ngram)
         if not postings:
@@ -140,10 +160,11 @@ def compute_scores(query: str) -> List[Tuple[int, float]]:
         for doc_id, pdata in postings.items():
             tf = pdata.get("tf", 0)
             if tf > 0:
-                scores[doc_id] += NGRAM_BOOST * (1 + math.log(tf)) * idf
+                scores[doc_id] += NGRAM_BOOST * (1 + math.log(tf)) * idf   # boost for phrase match
 
-    # 3) Positional proximity
-    if len(q_tf) > 1:
+    # ----------------- 3) Positional proximity -----------------
+
+    if len(q_tf) > 1:                                 # only meaningful for multi-term queries
         doc_term_positions = defaultdict(lambda: defaultdict(list))
 
         for term in q_tf.keys():
@@ -154,24 +175,25 @@ def compute_scores(query: str) -> List[Tuple[int, float]]:
             for doc_id, pdata in postings.items():
                 positions = pdata.get("positions", [])
                 if positions:
-                    doc_term_positions[doc_id][term].extend(positions)
+                    doc_term_positions[doc_id][term].extend(positions)   # store positions per term
 
         for doc_id, term_pos in doc_term_positions.items():
             if len(term_pos) < 2:
-                continue
+                continue                                  # need at least 2 distinct terms
 
             all_positions = []
             for term, pos_list in term_pos.items():
                 for p in pos_list:
-                    all_positions.append((p, term))
+                    all_positions.append((p, term))        # flatten positions
 
-            all_positions.sort()
+            all_positions.sort()                           # sort by position
 
             best_span = None
             left = 0
             term_counts = defaultdict(int)
             distinct_terms = 0
 
+            # Sliding window to find smallest span containing all query terms
             for right in range(len(all_positions)):
                 pos_r, term_r = all_positions[right]
                 if term_counts[term_r] == 0:
@@ -190,22 +212,25 @@ def compute_scores(query: str) -> List[Tuple[int, float]]:
                     left += 1
 
             if best_span is not None and best_span <= 10:
-                scores[doc_id] *= PROXIMITY_BOOST
+                scores[doc_id] *= PROXIMITY_BOOST         # reward tight proximity
 
-    # 4) PageRank
+    # ----------------- 4) PageRank -----------------
+
     for doc_id in list(scores.keys()):
         meta = doc_meta.get(str(doc_id), {})
         pr = meta.get("pagerank", 0.0)
-        scores[doc_id] += PAGERANK_WEIGHT * pr
+        scores[doc_id] += PAGERANK_WEIGHT * pr            # add PageRank influence
 
-    # Normalize by doc length
+    # ----------------- 5) Length normalization -----------------
+
     for doc_id in list(scores.keys()):
         length = doc_meta.get(str(doc_id), {}).get("length", 1)
         if length > 0:
-            scores[doc_id] /= math.sqrt(length)
+            scores[doc_id] /= math.sqrt(length)           # normalize by sqrt(doc length)
 
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return ranked[:MAX_RESULTS]
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)   # sort by score
+    return ranked[:MAX_RESULTS]                           # return top-k results
+
 
 # ----------------- CLI INTERFACE -----------------
 
@@ -216,21 +241,20 @@ def cli_loop():
         if q.lower() == "/exit":
             break
 
-        # Analytics [Begin]
-        start = time.perf_counter()
-        results = compute_scores(q)
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        record_query_time(elapsed_ms)
+        start = time.perf_counter()                       # start timer
+        results = compute_scores(q)                       # compute ranked results
+        elapsed_ms = (time.perf_counter() - start) * 1000 # compute query latency
+        record_query_time(elapsed_ms)                     # log analytics
         print(f"Query time: {elapsed_ms:.2f} ms")
-        # Analytics [End]
 
         print(f"Top {len(results)} results:")
         for rank, (doc_id, score) in enumerate(results, start=1):
             meta = doc_meta[str(doc_id)]
-            print(f"{rank}. {meta['url']} (score={score:.4f})")
+            print(f"{rank}. {meta['url']} (score={score:.4f})")   # print ranked results
+
 
 if __name__ == "__main__":
     print("Starting search engine... (may take a few minutes)")
-    load_metadata()
+    load_metadata()                                       # load lexicon + metadata
     print("--------------------------------------------------------------------------------")
-    cli_loop()
+    cli_loop()                                            # start interactive loop

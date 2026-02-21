@@ -9,34 +9,41 @@ import re
 from pathlib import Path
 from typing import List, Dict, Tuple, Set
 
-from bs4 import BeautifulSoup  # pip install beautifulsoup4
-from bs4 import XMLParsedAsHTMLWarning
-from bs4 import MarkupResemblesLocatorWarning
+from bs4 import BeautifulSoup  # HTML parser that handles messy web pages
+from bs4 import XMLParsedAsHTMLWarning  # warning when XML-like content is parsed as HTML
+from bs4 import MarkupResemblesLocatorWarning  # warning when text looks like a URL
 import warnings
-from nltk.stem import PorterStemmer  # pip install nltk
+from nltk.stem import PorterStemmer  # classic IR stemmer
 
-warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning) # HTML parsing is more time-efficient than XML parsing detection.
-warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning) # Prase data that happens to look like a URL.
-ps = PorterStemmer()
+# Suppress warnings that appear frequently when parsing ICS pages
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)  # HTML parsing is faster than XML; safe to ignore
+warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)  # ignore warnings when text resembles a URL
+
+ps = PorterStemmer()  # instantiate the Porter stemmer once for efficiency
 
 # Simple alphanumeric tokenizer regex.
-TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+TOKEN_RE = re.compile(r"[A-Za-z0-9]+")  # matches sequences of letters/numbers only
+
 
 def load_json(path: Path):
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    with path.open("r", encoding="utf-8") as f:  # open file safely with UTF-8
+        return json.load(f)  # parse JSON into Python object
+
 
 def save_json(path: Path, obj):
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2)
+    with path.open("w", encoding="utf-8") as f:  # open file for writing
+        json.dump(obj, f, indent=2)  # pretty-print JSON for readability
+
 
 def tokenize(text: str) -> List[str]:
     """Tokenize into alphanumeric tokens, lowercase, no stemming yet."""
-    return [t.lower() for t in TOKEN_RE.findall(text)]
+    return [t.lower() for t in TOKEN_RE.findall(text)]  # extract tokens + lowercase for normalization
+
 
 def stem(token: str) -> str:
     """Apply Porter stemming."""
-    return ps.stem(token)
+    return ps.stem(token)  # reduce token to morphological root (e.g., "running" → "run")
+
 
 def extract_html_fields(html: str):
     """
@@ -47,66 +54,70 @@ def extract_html_fields(html: str):
     - bold tokens
     - anchor tokens + link targets
     """
-    soup = BeautifulSoup(html, "lxml")  # lxml handles broken HTML reasonably well
+    soup = BeautifulSoup(html, "lxml")  # lxml parser handles broken HTML better than built-in parsers
 
     # Title
-    title_text = soup.title.get_text(separator=" ", strip=True) if soup.title else ""
-    title_tokens = tokenize(title_text)
+    title_text = soup.title.get_text(separator=" ", strip=True) if soup.title else ""  # extract <title> text
+    title_tokens = tokenize(title_text)  # tokenize title
 
     # Headings
     heading_tokens = []
-    for tag_name in ["h1", "h2", "h3"]:
-        for tag in soup.find_all(tag_name):
-            heading_tokens.extend(tokenize(tag.get_text(separator=" ", strip=True)))
+    for tag_name in ["h1", "h2", "h3"]:  # only index top-level headings
+        for tag in soup.find_all(tag_name):  # find all <h1>, <h2>, <h3>
+            heading_tokens.extend(tokenize(tag.get_text(separator=" ", strip=True)))  # tokenize heading text
 
     # Bold/strong
     bold_tokens = []
-    for tag in soup.find_all(["b", "strong"]):
-        bold_tokens.extend(tokenize(tag.get_text(separator=" ", strip=True)))
+    for tag in soup.find_all(["b", "strong"]):  # bold text often indicates emphasis
+        bold_tokens.extend(tokenize(tag.get_text(separator=" ", strip=True)))  # tokenize bold text
 
     # Anchor text + hrefs
     anchor_tokens = []
     anchor_links = []  # list of (href, anchor_text_tokens)
-    for a in soup.find_all("a"):
-        href = a.get("href")
+    for a in soup.find_all("a"):  # iterate all hyperlinks
+        href = a.get("href")  # extract link target
         if not href:
             continue
-        text = a.get_text(separator=" ", strip=True)
+        text = a.get_text(separator=" ", strip=True)  # visible anchor text
         tokens = tokenize(text)
         if tokens:
-            anchor_tokens.extend(tokens)
-            anchor_links.append((href, tokens))
+            anchor_tokens.extend(tokens)  # anchor text contributes to ranking
+            anchor_links.append((href, tokens))  # store (URL, tokens) for PageRank graph
 
     # Full visible text (fallback: soup.get_text)
-    full_text = soup.get_text(separator=" ", strip=True)
-    full_tokens = tokenize(full_text)
+    full_text = soup.get_text(separator=" ", strip=True)  # extract all visible text
+    full_tokens = tokenize(full_text)  # tokenize full page text
 
     return {
-        "full_tokens": full_tokens,
-        "title_tokens": title_tokens,
-        "heading_tokens": heading_tokens,
-        "bold_tokens": bold_tokens,
-        "anchor_tokens": anchor_tokens,
-        "anchor_links": anchor_links,
+        "full_tokens": full_tokens,          # all tokens on the page
+        "title_tokens": title_tokens,        # tokens from <title>
+        "heading_tokens": heading_tokens,    # tokens from <h1>, <h2>, <h3>
+        "bold_tokens": bold_tokens,          # tokens from <b> and <strong>
+        "anchor_tokens": anchor_tokens,      # tokens from anchor text
+        "anchor_links": anchor_links,        # list of (href, tokens) for PageRank graph
     }
+
 
 def build_ngrams(tokens: List[str], n: int) -> List[str]:
     """Build n-grams as 'token1_token2_..._tokenn' strings."""
-    if len(tokens) < n:
+    if len(tokens) < n:  # cannot build n-grams if not enough tokens
         return []
-    return ["_".join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+    return ["_".join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]  # sliding window n-gram builder
+
 
 def compute_shingles(tokens: List[str], k: int) -> Set[str]:
     """Compute k-shingles (for near-duplicate detection)."""
-    return set(build_ngrams(tokens, k))
+    return set(build_ngrams(tokens, k))  # shingles are simply k-grams stored as a set
+
 
 def jaccard(a: Set[str], b: Set[str]) -> float:
     if not a and not b:
-        return 1.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
+        return 1.0  # two empty sets are identical
+    inter = len(a & b)  # intersection size
+    union = len(a | b)  # union size
+    return inter / union if union else 0.0  # avoid division by zero
+
 
 def log_idf(N: int, df: int) -> float:
     """Compute log-based idf; add 1 to avoid division by zero."""
-    return math.log((N + 1) / (df + 1)) + 1.0
+    return math.log((N + 1) / (df + 1)) + 1.0  # smoothed idf: log((N+1)/(df+1)) + 1
