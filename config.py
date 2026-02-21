@@ -37,7 +37,7 @@ TRIGRAM_INDEX_PATH = FINAL_INDEX_DIR / "trigram_index.txt"  # final postings for
 MAX_TERMS_IN_MEMORY = 100_000  # prevents RAM overflow by writing partial indexes
 
 # Delete partial index files after merging?
-DELETE_PARTIALS_AFTER_MERGE = True  # saves disk space once final index is built
+DELETE_PARTIALS_AFTER_MERGE = False  # saves disk space once final index is built
 
 # **Near-duplicate detection parameters.**
 SHINGLE_SIZE = 5               # number of tokens per shingle (used for Jaccard similarity)

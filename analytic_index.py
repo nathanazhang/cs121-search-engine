@@ -35,17 +35,6 @@ def file_size_kb(path: Path):
 
 
 # ------------------------------------------------------------
-#  Compute total index directory size
-# ------------------------------------------------------------
-def compute_index_size_kb():
-    total = 0
-    for root, _, files in os.walk(INDEX_ROOT):   # walk entire index_data directory
-        for f in files:
-            total += os.path.getsize(os.path.join(root, f))  # accumulate file sizes
-    return round(total / 1024, 2)                # convert bytes → KB
-
-
-# ------------------------------------------------------------
 #  Main analytics computation
 # ------------------------------------------------------------
 def compute_analytic():
@@ -80,17 +69,17 @@ def compute_analytic():
     # ----------------------------
     # Duplicate counts
     # ----------------------------
-    num_exact = 0
-    num_near = 0
+    num_duplicate_exact = 0
+    num_duplicate_near = 0
 
     for meta in doc_meta.values():               # iterate all documents
         if meta.get("duplicate_of") is not None: # skip unique docs
             if meta.get("duplicate_type") == "exact":
-                num_exact += 1                   # exact duplicate count
+                num_duplicate_exact += 1                   # exact duplicate count
             elif meta.get("duplicate_type") == "near":
-                num_near += 1                    # near duplicate count
+                num_duplicate_near += 1                    # near duplicate count
 
-    num_total = num_exact + num_near             # total duplicates
+    num_total = num_duplicate_exact + num_duplicate_near             # total duplicates
 
     # ----------------------------
     # File sizes
@@ -124,8 +113,8 @@ def compute_analytic():
         "num_token_trigram": num_token_trigram,       # trigram vocab size
 
         "num_duplicate_total": num_total,             # total duplicates
-        "num_duplicate_exact": num_exact,             # exact duplicates
-        "num_duplicate_near": num_near,               # near duplicates
+        "num_duplicate_exact": num_duplicate_exact,             # exact duplicates
+        "num_duplicate_near": num_duplicate_near,               # near duplicates
 
         "index_size_kb_total_kb": size_total,         # combined index size
         "index_size_kb_unigram_index": size_unigram,  # unigram index size
@@ -142,4 +131,5 @@ def compute_analytic():
 
 
 if __name__ == "__main__":
+    print("Computing analytics from built index... (may take a few minutes)")
     compute_analytic()                                # run analytics if executed directly
